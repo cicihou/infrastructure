@@ -84,7 +84,7 @@ Resources:
       VpcId:
         Ref: myVPC
       CidrBlock: !Ref Subnet2CIDR
-      AvailabilityZone: !Ref Subnet1AZ
+      AvailabilityZone: !Ref Subnet2AZ
       Tags:
         - Key: Name
           Value: !Ref AWS::StackName
@@ -94,7 +94,7 @@ Resources:
       VpcId:
         Ref: myVPC
       CidrBlock: !Ref Subnet3CIDR
-      AvailabilityZone: !Ref Subnet1AZ
+      AvailabilityZone: !Ref Subnet3AZ
       Tags:
         - Key: Name
           Value: !Ref AWS::StackName
