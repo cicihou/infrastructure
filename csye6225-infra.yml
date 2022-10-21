@@ -30,6 +30,14 @@ Parameters:
     Description: Zone 3, !Select [ 2, !GetAZs '' ]
     Type: String
     Default: "us-east-1c"
+  AmiID:
+    Description: the ami id, you will get it after you run packer
+    Type: String
+    Default: "ami-0c7e19d6e3d49353f"
+  KeyName:
+    Description: the keypair name you import to aws
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: "aws-us-east-1"
 
 
 Resources:
@@ -119,6 +127,47 @@ Resources:
         Ref: mySubnet3
       RouteTableId:
         Ref: PublicRouteTable
+  ApplicationSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Allow http to client host
+      VpcId:
+        Ref: myVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22928
+          ToPort: 22928
+          CidrIp: 0.0.0.0/0
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiID
+      KeyName: !Ref KeyName
+      InstanceType: t2.micro
+      DisableApiTermination: false
+      SubnetId: !Ref mySubnet1
+      SecurityGroupIds:
+        - !Ref ApplicationSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: "50"
+            VolumeType : "gp2"
+            DeleteOnTermination: "true"
+
+
 Outputs:
   VpcId:
     Description: The VPC ID
@@ -132,3 +181,9 @@ Outputs:
   SubnetId3:
     Description: The Subnet ID
     Value: !Ref mySubnet3
+  EC2InstanceID:
+    Description: The instance ID
+    Value: !Ref EC2Instance
+  ApplicationSecurityGroup:
+    Description: The SG ID
+    Value: !Ref ApplicationSecurityGroup
