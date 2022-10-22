@@ -166,7 +166,20 @@ Resources:
             VolumeSize: "50"
             VolumeType : "gp2"
             DeleteOnTermination: "true"
-
+#  MyEIP:
+#    Type: AWS::EC2::EIP
+#    Properties:
+#      InstanceId: !Ref EC2Instance
+  MyEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  MyPublic:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt MyEIP.AllocationId
+      InstanceId:
+        Ref: EC2Instance
 
 Outputs:
   VpcId:
@@ -181,7 +194,7 @@ Outputs:
   SubnetId3:
     Description: The Subnet ID
     Value: !Ref mySubnet3
-  EC2InstanceID:
+  EC2Instance:
     Description: The instance ID
     Value: !Ref EC2Instance
   ApplicationSecurityGroup:

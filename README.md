@@ -21,7 +21,7 @@ aws cloudformation create-stack --stack-name myvpc --template-body file://csye62
 2. create a stack with declared parameters
 ```
 aws cloudformation create-stack --stack-name myvpcwithparam --template-body file://csye6225-infra.yml 
---parameters ParameterKey=AmiID,ParameterValue="ami-0c7e19d6e3d49353f"
+--parameters ParameterKey=AmiID,ParameterValue="ami-04de74179040bacf2"
 ```
 
 3. update a stack
