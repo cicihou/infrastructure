@@ -20,8 +20,7 @@ aws cloudformation create-stack --stack-name myvpc --template-body file://csye62
 
 2. create a stack with declared parameters
 ```
-aws cloudformation create-stack --stack-name myvpcwithparam --template-body file://csye6225-infra.yml 
---parameters ParameterKey=AmiID,ParameterValue="ami-04de74179040bacf2"
+aws cloudformation create-stack --stack-name myvpcwithparam --template-body file://csye6225-infra.yml --parameters ParameterKey=AmiID,ParameterValue="ami-0930fc704e5a8f64d" --capabilities CAPABILITY_NAMED_IAM
 ```
 
 3. update a stack
@@ -36,5 +35,5 @@ aws cloudformation delete-stack --stack-name myvpc
 
 5. validate a template
 ```
- aws cloudformation validate-template --template-body file://csye6225-infra.yml
+aws cloudformation validate-template --template-body file://csye6225-infra.yml
 ```

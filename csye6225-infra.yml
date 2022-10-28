@@ -11,11 +11,9 @@ Parameters:
     Type: String
     Default: "10.192.10.0/24"
   Subnet2CIDR:
-    Description: IP range (CIDR notation)
     Type: String
     Default: "10.192.11.0/24"
   Subnet3CIDR:
-    Description: IP range (CIDR notation)
     Type: String
     Default: "10.192.12.0/24"
   Subnet1AZ:
@@ -38,6 +36,28 @@ Parameters:
     Description: the keypair name you import to aws
     Type: AWS::EC2::KeyPair::KeyName
     Default: "aws-us-east-1"
+  MasterUserPassword:
+    Type: String
+    NoEcho: true
+    Default: "mysql1234"
+  RDSSubnet1AZ:
+    Type: String
+    Default: "us-east-1d"
+  RDSSubnet2AZ:
+    Type: String
+    Default: "us-east-1e"
+  RDSSubnet3AZ:
+    Type: String
+    Default: "us-east-1f"
+  RDSSubnet1CIDR:
+    Type: String
+    Default: "10.192.13.0/24"
+  RDSSubnet2CIDR:
+    Type: String
+    Default: "10.192.14.0/24"
+  RDSSubnet3CIDR:
+    Type: String
+    Default: "10.192.15.0/24"
 
 
 Resources:
@@ -86,6 +106,7 @@ Resources:
       Tags:
         - Key: Name
           Value: !Ref AWS::StackName
+      MapPublicIpOnLaunch: true
   mySubnet2:
     Type: AWS::EC2::Subnet
     Properties:
@@ -96,6 +117,7 @@ Resources:
       Tags:
         - Key: Name
           Value: !Ref AWS::StackName
+      MapPublicIpOnLaunch: true
   mySubnet3:
     Type: AWS::EC2::Subnet
     Properties:
@@ -106,6 +128,7 @@ Resources:
       Tags:
         - Key: Name
           Value: !Ref AWS::StackName
+      MapPublicIpOnLaunch: true
   mySubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -131,6 +154,7 @@ Resources:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
       GroupDescription: Allow http to client host
+      GroupName: application
       VpcId:
         Ref: myVPC
       SecurityGroupIngress:
@@ -153,9 +177,32 @@ Resources:
   EC2Instance:
     Type: AWS::EC2::Instance
     Properties:
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash
+            touch config
+            export WEBAPP_ENV=PROD
+            export DB_HOST=${RDSDBInstance.Endpoint.Address}
+            export DB_USERNAME=${MasterUserPassword}
+            export S3_BUCKET=${S3Bucket}
+            echo 'S3_BUCKET=${S3Bucket}' >> .bashrc
+            echo 'DB_USERNAME=${MasterUserPassword}' >> .bashrc
+            echo 'DB_HOST=${RDSDBInstance.Endpoint.Address}' >> .bashrc
+            echo 'WEBAPP_ENV=PROD' >> .bashrc
+            python3 manage.py db stamp head
+            python3 manage.py db migrate
+            python3 manage.py db upgrade
+            sudo systemctl daemon-reload
+            sudo systemctl status python.service
+            sudo systemctl list-units
+            sudo systemctl enable python.service
+            sudo systemctl start python.service
+            sudo journalctl -u python.service
       ImageId: !Ref AmiID
       KeyName: !Ref KeyName
       InstanceType: t2.micro
+      IamInstanceProfile: !Ref IAMInstanceProfile
       DisableApiTermination: false
       SubnetId: !Ref mySubnet1
       SecurityGroupIds:
@@ -166,20 +213,166 @@ Resources:
             VolumeSize: "50"
             VolumeType : "gp2"
             DeleteOnTermination: "true"
-#  MyEIP:
-#    Type: AWS::EC2::EIP
+  RDSDBInstance:
+    Properties:
+      Engine: "MySQL"
+      EngineVersion: "8.0.30"
+      DBInstanceClass: "db.t3.micro"
+      MultiAZ: "false"
+      DBInstanceIdentifier: "csye6225"
+      MasterUsername: "csye6225"
+      MasterUserPassword: !Ref MasterUserPassword
+      DBSubnetGroupName: !Ref myDBSubnetGroup
+      PubliclyAccessible: "false"
+      DBName: "csye6225"
+      AllocatedStorage: "50"
+#      Iops: gp2
+#      DBSecurityGroups: !Ref DatabaseSecurityGroup
+      VPCSecurityGroups: [!Ref DatabaseSecurityGroup]
+      DBParameterGroupName: !Ref RDSDBParameterGroup
+    Type: 'AWS::RDS::DBInstance'
+  RDSDBParameterGroup:
+    Type: 'AWS::RDS::DBParameterGroup'
+    Properties:
+      Description: CloudFormation Sample MySQL Parameter Group
+      Family: mysql8.0
+  RDSSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref myVPC
+      CidrBlock: !Ref RDSSubnet1CIDR
+      AvailabilityZone: !Ref RDSSubnet1AZ
+  RDSSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref myVPC
+      CidrBlock: !Ref RDSSubnet2CIDR
+      AvailabilityZone: !Ref RDSSubnet2AZ
+  RDSSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref myVPC
+      CidrBlock: !Ref RDSSubnet3CIDR
+      AvailabilityZone: !Ref RDSSubnet3AZ
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref myVPC
+#  PrivateRoute:
+#    Type: AWS::EC2::Route
 #    Properties:
-#      InstanceId: !Ref EC2Instance
-  MyEIP:
-    Type: AWS::EC2::EIP
+#      RouteTableId: !Ref PrivateRouteTable
+#      DestinationCidrBlock: 0.0.0.0/0
+#      InstanceId: !Ref RDSDBInstance
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      Domain: vpc
-  MyPublic:
-    Type: AWS::EC2::EIPAssociation
+      SubnetId: !Ref RDSSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      AllocationId: !GetAtt MyEIP.AllocationId
-      InstanceId:
-        Ref: EC2Instance
+      SubnetId: !Ref RDSSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+  PrivateSubnet3RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref RDSSubnet3
+      RouteTableId: !Ref PrivateRouteTable
+  myDBSubnetGroup:
+    Properties:
+      DBSubnetGroupDescription: description
+      SubnetIds:
+        - !Ref RDSSubnet1
+        - !Ref RDSSubnet2
+        - !Ref RDSSubnet3
+    Type: "AWS::RDS::DBSubnetGroup"
+#  DatabaseSecurityGroup:
+#    Type: AWS::RDS::DBSecurityGroup
+#    Properties:
+#      EC2VpcId: !Ref myVPC
+#      DBSecurityGroupIngress:
+#        - EC2SecurityGroupName:
+#            Ref: "ApplicationSecurityGroup"
+#      GroupDescription: "DB"
+  DatabaseSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: SG for DB
+      GroupName: database
+      VpcId: !Ref myVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref ApplicationSecurityGroup
+#          CidrIp: 0.0.0.0/0  # the ip should from application
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+  S3Bucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: "Delete"
+    Properties:
+      BucketName:
+        !Sub
+          - 'webapp-${RandomGUID}'
+          - { RandomGUID: !Select [0, !Split ["-", !Select [2, !Split ["/", !Ref AWS::StackId ]]]] }
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Status: Enabled
+            Id: Rule for webapp s3
+#            ExpirationInDays: 30
+            Transitions:
+              - TransitionInDays: 30
+                StorageClass: STANDARD_IA
+  IAMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      RoleName: "EC2-CSYE6225"
+      Path: "/"
+  RolePolicies:
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyName: "WebAppS3"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action: "*"
+            Resource: [
+                !Sub "arn:aws:s3:::${S3Bucket}",
+                !Sub "arn:aws:s3:::${S3Bucket}/*",
+              ]
+      Roles:
+        - Ref: "IAMRole"
+  IAMInstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      Path: "/"
+      Roles:
+        - Ref: "IAMRole"
+
 
 Outputs:
   VpcId:
@@ -194,9 +387,17 @@ Outputs:
   SubnetId3:
     Description: The Subnet ID
     Value: !Ref mySubnet3
+  RDSSubnet1:
+    Value: !Ref RDSSubnet1
+  RDSSubnet2:
+    Value: !Ref RDSSubnet2
+  RDSSubnet3:
+    Value: !Ref RDSSubnet3
   EC2Instance:
     Description: The instance ID
     Value: !Ref EC2Instance
   ApplicationSecurityGroup:
     Description: The SG ID
     Value: !Ref ApplicationSecurityGroup
+#  MyBucketName:
+#    Value: !Ref 'S3Bucket'
