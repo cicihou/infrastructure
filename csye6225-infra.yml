@@ -192,7 +192,6 @@ Resources:
             sudo systemctl enable python.service
             sudo systemctl restart python.service
             sudo systemctl status python.service
-            sudo journalctl -u python.service -f
       ImageId: !Ref AmiID
       KeyName: !Ref KeyName
       InstanceType: t2.micro
@@ -256,7 +255,7 @@ Resources:
 #    Type: AWS::EC2::Route
 #    Properties:
 #      RouteTableId: !Ref PrivateRouteTable
-#      DestinationCidrBlock: 0.0.0.0/0
+#      DestinationCidrBlock: 10.192.12.0/24
 #      InstanceId: !Ref RDSDBInstance
   PrivateSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
