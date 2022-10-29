@@ -181,24 +181,18 @@ Resources:
         Fn::Base64:
           !Sub |
             #!/bin/bash
-            touch config
-            export WEBAPP_ENV=PROD
-            export DB_HOST=${RDSDBInstance.Endpoint.Address}
-            export DB_USERNAME=${MasterUserPassword}
-            export S3_BUCKET=${S3Bucket}
-            echo 'S3_BUCKET=${S3Bucket}' >> .bashrc
-            echo 'DB_USERNAME=${MasterUserPassword}' >> .bashrc
-            echo 'DB_HOST=${RDSDBInstance.Endpoint.Address}' >> .bashrc
-            echo 'WEBAPP_ENV=PROD' >> .bashrc
-            python3 manage.py db stamp head
-            python3 manage.py db migrate
-            python3 manage.py db upgrade
+            sudo chmod 777 /home/ubuntu/env
+            echo -e "DB_HOST=${RDSDBInstance.Endpoint.Address}" >> env
+            echo -e "DB_USERNAME=${MasterUserPassword}" >> env
+            echo -e "S3_BUCKET=${S3Bucket}" >> env
+            WEBAPP_ENV=prod python3 /home/ubuntu/manage.py db stamp head
+            WEBAPP_ENV=prod python3 /home/ubuntu/manage.py db migrate
+            WEBAPP_ENV=prod python3 /home/ubuntu/manage.py db upgrade
             sudo systemctl daemon-reload
-            sudo systemctl status python.service
-            sudo systemctl list-units
             sudo systemctl enable python.service
-            sudo systemctl start python.service
-            sudo journalctl -u python.service
+            sudo systemctl restart python.service
+            sudo systemctl status python.service
+            sudo journalctl -u python.service -f
       ImageId: !Ref AmiID
       KeyName: !Ref KeyName
       InstanceType: t2.micro
