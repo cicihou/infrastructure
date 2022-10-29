@@ -40,5 +40,5 @@ aws cloudformation validate-template --template-body file://csye6225-infra.yml
 
 6. delete a non-empty bucket before delete stack
 ```
-aws s3 rm s3://webapp-90b5dbc0 --recursive
+aws s3 rm s3://webapp-6cc2cd00 --recursive
 ```

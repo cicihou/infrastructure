@@ -182,12 +182,12 @@ Resources:
           !Sub |
             #!/bin/bash
             sudo chmod 777 /home/ubuntu/env
-            echo -e "DB_HOST=${RDSDBInstance.Endpoint.Address}" >> env
-            echo -e "DB_USERNAME=${MasterUserPassword}" >> env
-            echo -e "S3_BUCKET=${S3Bucket}" >> env
-            WEBAPP_ENV=prod python3 /home/ubuntu/manage.py db stamp head
-            WEBAPP_ENV=prod python3 /home/ubuntu/manage.py db migrate
-            WEBAPP_ENV=prod python3 /home/ubuntu/manage.py db upgrade
+            echo -e "DB_HOST=${RDSDBInstance.Endpoint.Address}" >> /home/ubuntu/env
+            echo -e "DB_PASSWORD=${MasterUserPassword}" >> /home/ubuntu/env
+            echo -e "S3_BUCKET=${S3Bucket}" >> /home/ubuntu/env
+            WEBAPP_ENV=prod DB_HOST=${RDSDBInstance.Endpoint.Address} DB_PASSWORD=${MasterUserPassword} python3 /home/ubuntu/manage.py db stamp head
+            WEBAPP_ENV=prod DB_HOST=${RDSDBInstance.Endpoint.Address} DB_PASSWORD=${MasterUserPassword} python3 /home/ubuntu/manage.py db migrate
+            WEBAPP_ENV=prod DB_HOST=${RDSDBInstance.Endpoint.Address} DB_PASSWORD=${MasterUserPassword} python3 /home/ubuntu/manage.py db upgrade
             sudo systemctl daemon-reload
             sudo systemctl enable python.service
             sudo systemctl restart python.service
@@ -281,14 +281,6 @@ Resources:
         - !Ref RDSSubnet2
         - !Ref RDSSubnet3
     Type: "AWS::RDS::DBSubnetGroup"
-#  DatabaseSecurityGroup:
-#    Type: AWS::RDS::DBSecurityGroup
-#    Properties:
-#      EC2VpcId: !Ref myVPC
-#      DBSecurityGroupIngress:
-#        - EC2SecurityGroupName:
-#            Ref: "ApplicationSecurityGroup"
-#      GroupDescription: "DB"
   DatabaseSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
@@ -301,10 +293,10 @@ Resources:
           ToPort: 3306
           SourceSecurityGroupId: !Ref ApplicationSecurityGroup
 #          CidrIp: 0.0.0.0/0  # the ip should from application
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          CidrIp: 0.0.0.0/0
+#        - IpProtocol: tcp
+#          FromPort: 22
+#          ToPort: 22
+#          CidrIp: 0.0.0.0/0
   S3Bucket:
     Type: 'AWS::S3::Bucket'
     DeletionPolicy: "Delete"
@@ -327,7 +319,6 @@ Resources:
         Rules:
           - Status: Enabled
             Id: Rule for webapp s3
-#            ExpirationInDays: 30
             Transitions:
               - TransitionInDays: 30
                 StorageClass: STANDARD_IA
