@@ -62,6 +62,9 @@ Parameters:
   RDSSubnet3CIDR:
     Type: String
     Default: "10.192.15.0/24"
+  DNSHostedZone:
+    Type: String
+    Default: "demo.xihou.me."
 
 
 Resources:
@@ -357,6 +360,16 @@ Resources:
       Path: "/"
       Roles:
         - Ref: "IAMRole"
+  myDNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneName: !Ref 'DNSHostedZone'
+      Comment: DNS name for my instance.
+      Name: demo.xihou.me
+      Type: A
+      TTL: 900
+      ResourceRecords:
+        - !GetAtt EC2Instance.PublicIp
 
 
 Outputs:
