@@ -36,6 +36,10 @@ Parameters:
     Description: the keypair name you import to aws
     Type: AWS::EC2::KeyPair::KeyName
     Default: "aws-us-east-1"
+  MasterUsername:
+    Type: String
+    NoEcho: true
+    Default: "csye6225"
   MasterUserPassword:
     Type: String
     NoEcho: true
@@ -58,6 +62,9 @@ Parameters:
   RDSSubnet3CIDR:
     Type: String
     Default: "10.192.15.0/24"
+  DNSHostedZone:
+    Type: String
+    Default: "demo.xihou.me."
 
 
 Resources:
@@ -184,11 +191,16 @@ Resources:
             sudo chmod 777 /home/ubuntu/env
             echo -e "DB_HOST=${RDSDBInstance.Endpoint.Address}" >> /home/ubuntu/env
             echo -e "DB_PASSWORD=${MasterUserPassword}" >> /home/ubuntu/env
+            echo -e "DB_USERNAME=${MasterUsername}" >> /home/ubuntu/env
             echo -e "S3_BUCKET=${S3Bucket}" >> /home/ubuntu/env
-            WEBAPP_ENV=prod DB_HOST=${RDSDBInstance.Endpoint.Address} DB_PASSWORD=${MasterUserPassword} python3 /home/ubuntu/manage.py db stamp head
-            WEBAPP_ENV=prod DB_HOST=${RDSDBInstance.Endpoint.Address} DB_PASSWORD=${MasterUserPassword} python3 /home/ubuntu/manage.py db migrate
-            WEBAPP_ENV=prod DB_HOST=${RDSDBInstance.Endpoint.Address} DB_PASSWORD=${MasterUserPassword} python3 /home/ubuntu/manage.py db upgrade
+            sudo touch /home/ubuntu/m.sh
+            sudo chmod 777 /home/ubuntu/m.sh
+            echo -e "WEBAPP_ENV=prod DB_HOST=${RDSDBInstance.Endpoint.Address} DB_PASSWORD=${MasterUserPassword} DB_USERNAME=${MasterUsername} python3 /home/ubuntu/manage.py db stamp head --directory /home/ubuntu/migrations" >> /home/ubuntu/m.sh
+            echo -e "WEBAPP_ENV=prod DB_HOST=${RDSDBInstance.Endpoint.Address} DB_PASSWORD=${MasterUserPassword} DB_USERNAME=${MasterUsername} python3 /home/ubuntu/manage.py db migrate --directory /home/ubuntu/migrations" >> /home/ubuntu/m.sh
+            echo -e "WEBAPP_ENV=prod DB_HOST=${RDSDBInstance.Endpoint.Address} DB_PASSWORD=${MasterUserPassword} DB_USERNAME=${MasterUsername} python3 /home/ubuntu/manage.py db upgrade --directory /home/ubuntu/migrations" >> /home/ubuntu/m.sh
             sudo systemctl daemon-reload
+            sudo systemctl enable m.service
+            sudo systemctl start m.service
             sudo systemctl enable python.service
             sudo systemctl restart python.service
             sudo systemctl status python.service
@@ -213,14 +225,12 @@ Resources:
       DBInstanceClass: "db.t3.micro"
       MultiAZ: "false"
       DBInstanceIdentifier: "csye6225"
-      MasterUsername: "csye6225"
+      MasterUsername: !Ref MasterUsername
       MasterUserPassword: !Ref MasterUserPassword
       DBSubnetGroupName: !Ref myDBSubnetGroup
       PubliclyAccessible: "false"
       DBName: "csye6225"
       AllocatedStorage: "50"
-#      Iops: gp2
-#      DBSecurityGroups: !Ref DatabaseSecurityGroup
       VPCSecurityGroups: [!Ref DatabaseSecurityGroup]
       DBParameterGroupName: !Ref RDSDBParameterGroup
     Type: 'AWS::RDS::DBInstance'
@@ -251,12 +261,6 @@ Resources:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref myVPC
-#  PrivateRoute:
-#    Type: AWS::EC2::Route
-#    Properties:
-#      RouteTableId: !Ref PrivateRouteTable
-#      DestinationCidrBlock: 10.192.12.0/24
-#      InstanceId: !Ref RDSDBInstance
   PrivateSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -291,11 +295,6 @@ Resources:
           FromPort: 3306
           ToPort: 3306
           SourceSecurityGroupId: !Ref ApplicationSecurityGroup
-#          CidrIp: 0.0.0.0/0  # the ip should from application
-#        - IpProtocol: tcp
-#          FromPort: 22
-#          ToPort: 22
-#          CidrIp: 0.0.0.0/0
   S3Bucket:
     Type: 'AWS::S3::Bucket'
     DeletionPolicy: "Delete"
@@ -343,7 +342,12 @@ Resources:
         Version: "2012-10-17"
         Statement:
           - Effect: "Allow"
-            Action: "*"
+            Action: ["s3:GetObject",
+                     "s3:PutObject",
+                     "s3:DeleteObject",
+                     "s3:ListBucket",
+                     "s3:GetBucketLocation"
+              ]
             Resource: [
                 !Sub "arn:aws:s3:::${S3Bucket}",
                 !Sub "arn:aws:s3:::${S3Bucket}/*",
@@ -356,6 +360,16 @@ Resources:
       Path: "/"
       Roles:
         - Ref: "IAMRole"
+  myDNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneName: !Ref 'DNSHostedZone'
+      Comment: DNS name for my instance.
+      Name: demo.xihou.me
+      Type: A
+      TTL: 900
+      ResourceRecords:
+        - !GetAtt EC2Instance.PublicIp
 
 
 Outputs:
@@ -383,5 +397,3 @@ Outputs:
   ApplicationSecurityGroup:
     Description: The SG ID
     Value: !Ref ApplicationSecurityGroup
-#  MyBucketName:
-#    Value: !Ref 'S3Bucket'
