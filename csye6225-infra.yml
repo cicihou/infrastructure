@@ -65,6 +65,9 @@ Parameters:
   DNSHostedZone:
     Type: String
     Default: "demo.xihou.me."
+  DNSName:
+    Type: String
+    Default: "demo.xihou.me"
 
 
 Resources:
@@ -323,6 +326,8 @@ Resources:
   IAMRole:
     Type: 'AWS::IAM::Role'
     Properties:
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -342,11 +347,10 @@ Resources:
         Version: "2012-10-17"
         Statement:
           - Effect: "Allow"
-            Action: ["s3:GetObject",
+            Action: ["s3:Get*",
+                     "s3:List*",
                      "s3:PutObject",
                      "s3:DeleteObject",
-                     "s3:ListBucket",
-                     "s3:GetBucketLocation"
               ]
             Resource: [
                 !Sub "arn:aws:s3:::${S3Bucket}",
@@ -365,7 +369,7 @@ Resources:
     Properties:
       HostedZoneName: !Ref 'DNSHostedZone'
       Comment: DNS name for my instance.
-      Name: demo.xihou.me
+      Name: !Ref DNSName
       Type: A
       TTL: 900
       ResourceRecords:
