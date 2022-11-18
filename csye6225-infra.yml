@@ -68,6 +68,15 @@ Parameters:
   DNSName:
     Type: String
     Default: "demo.xihou.me"
+#  lambdaBucketName:
+#    Type: String
+#    Default: "csye6225-22928"
+#  lambdaFuncName:
+#    Type: String
+#    Default: "lambda_function.zip"
+  dynamoTable:
+    Type: String
+    Default: "UserTokenTable"
 
 
 Resources:
@@ -196,6 +205,7 @@ Resources:
             echo -e "DB_PASSWORD=${MasterUserPassword}" >> /home/ubuntu/env
             echo -e "DB_USERNAME=${MasterUsername}" >> /home/ubuntu/env
             echo -e "S3_BUCKET=${S3Bucket}" >> /home/ubuntu/env
+            echo -e "SNS_TOPIC_ARN=${SNSTopic}" >> /home/ubuntu/env
             sudo touch /home/ubuntu/m.sh
             sudo chmod 777 /home/ubuntu/m.sh
             echo -e "WEBAPP_ENV=prod DB_HOST=${RDSDBInstance.Endpoint.Address} DB_PASSWORD=${MasterUserPassword} DB_USERNAME=${MasterUsername} python3 /home/ubuntu/manage.py db stamp head --directory /home/ubuntu/migrations" >> /home/ubuntu/m.sh
@@ -222,6 +232,8 @@ Resources:
             VolumeType : "gp2"
             DeleteOnTermination: "true"
   RDSDBInstance:
+    Type: 'AWS::RDS::DBInstance'
+    DeletionPolicy: Delete
     Properties:
       Engine: "MySQL"
       EngineVersion: "8.0.30"
@@ -236,7 +248,6 @@ Resources:
       AllocatedStorage: "50"
       VPCSecurityGroups: [!Ref DatabaseSecurityGroup]
       DBParameterGroupName: !Ref RDSDBParameterGroup
-    Type: 'AWS::RDS::DBInstance'
   RDSDBParameterGroup:
     Type: 'AWS::RDS::DBParameterGroup'
     Properties:
@@ -328,6 +339,8 @@ Resources:
     Properties:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+        - arn:aws:iam::aws:policy/AmazonSNSFullAccess
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -374,6 +387,149 @@ Resources:
       TTL: 900
       ResourceRecords:
         - !GetAtt EC2Instance.PublicIp
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${AWS::StackName}-SNSTopic'
+      DisplayName: !Sub '${AWS::StackName}-SNSTopic'
+      Subscription:
+        - Endpoint: !GetAtt LambdaFunction.Arn
+          Protocol: "lambda"
+  SNSTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2008-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "*"
+            Action:
+              - SNS:Publish
+              - SNS:Subscribe
+              - SNS:ListSubscriptionsByTopic
+              - SNS:GetTopicAttributes
+              - SNS:SetTopicAttributes
+              - SNS:AddPermission
+              - SNS:RemovePermission
+              - SNS:DeleteTopic
+            Resource: !Ref SNSTopic
+            Condition:
+              StringEquals:
+                AWS:SourceOwner: !Ref AWS::AccountId
+      Topics:
+        - !Ref SNSTopic
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref dynamoTable
+      BillingMode: PROVISIONED
+      AttributeDefinitions:
+        - AttributeName: username
+          AttributeType: S
+        - AttributeName: token
+          AttributeType: S
+      TimeToLiveSpecification:
+        Enabled: true
+        AttributeName: tokenttl
+      KeySchema:
+        - AttributeName: username
+          KeyType: HASH
+        - AttributeName: token
+          KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+  SNSTopicLambdaPermission:
+    DependsOn: LambdaFunction
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LambdaFunction
+      Action: "lambda:InvokeFunction"
+      Principal: "sns.amazonaws.com"
+      SourceArn: !Ref SNSTopic
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+#        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - "arn:aws:iam::aws:policy/AmazonSESFullAccess"
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: !Sub 'csye6225-Lambda-function'
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: python3.9
+      Timeout: 60
+      MemorySize: 128
+      PackageType: Zip
+      TracingConfig:
+        Mode: Active
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          from botocore.exceptions import ClientError
+          def lambda_handler(event, context):
+              payloads = event['Records'][0]["Sns"]
+              msg = json.loads(payloads['Message'])
+              SENDER = "notification@demo.xihou.me"
+              RECIPIENT = msg['to']
+
+              DESTINATION = {'ToAddresses': [
+                      msg['to'],
+                  ]
+              }
+
+              SUBJECT = payloads['Subject']
+              BODY = msg['content']
+              CHARSET = "UTF-8"
+
+              client = boto3.client('ses')
+
+              try:
+                  resp = client.send_email(
+                      Destination=DESTINATION,
+                      Message={
+                          'Body': {
+                              'Html': {
+                                  'Charset': CHARSET,
+                                  'Data': BODY,
+                              },
+                          },
+                          'Subject': {
+                              'Charset': CHARSET,
+                              'Data': SUBJECT,
+                          },
+                      },
+                      Source=SENDER,
+                  )
+              # Display an error if something goes wrong.
+              except ClientError as e:
+                  print(e.response['Error']['Message'])
+              else:
+                  print("Email sent! Message ID:")
+                  print(resp['MessageId'])
+                  print(RECIPIENT)
+
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps(resp)
+                  }
+
+#        S3Bucket: !Ref lambdaBucketName
+#        S3Key: !Ref lambdaFuncName
 
 
 Outputs:
