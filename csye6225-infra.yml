@@ -484,7 +484,7 @@ Resources:
           def lambda_handler(event, context):
               payloads = event['Records'][0]["Sns"]
               msg = json.loads(payloads['Message'])
-              SENDER = "notification@demo.xihou.me"
+              SENDER = "support@demo.xihou.me"
               RECIPIENT = msg['to']
 
               DESTINATION = {'ToAddresses': [
@@ -519,6 +519,7 @@ Resources:
               except ClientError as e:
                   print(e.response['Error']['Message'])
               else:
+                  print(resp)
                   print("Email sent! Message ID:")
                   print(resp['MessageId'])
                   print(RECIPIENT)
