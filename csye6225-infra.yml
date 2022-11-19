@@ -440,6 +440,20 @@ Resources:
       ProvisionedThroughput:
         ReadCapacityUnits: 1
         WriteCapacityUnits: 1
+  UserEmailTrackingDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: 'emailTrackingTable'
+      BillingMode: PROVISIONED
+      AttributeDefinitions:
+        - AttributeName: email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: email
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
   SNSTopicLambdaPermission:
     DependsOn: LambdaFunction
     Type: AWS::Lambda::Permission
@@ -464,6 +478,7 @@ Resources:
 #        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
         - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
         - "arn:aws:iam::aws:policy/AmazonSESFullAccess"
+        - "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess"
   LambdaFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -497,8 +512,15 @@ Resources:
               CHARSET = "UTF-8"
 
               client = boto3.client('ses')
+              dynamo = boto3.resource('dynamodb')
+              table = dynamo.Table('emailTrackingTable')
 
               try:
+                  resp = table.get_item(Key={'email': BODY})
+                  item = resp.get('Item', {})
+                  if item:
+                      print('The email content has been sent!')
+                      return {'statusCode': 200, 'body': json.dumps(item)}
                   resp = client.send_email(
                       Destination=DESTINATION,
                       Message={
@@ -515,6 +537,8 @@ Resources:
                       },
                       Source=SENDER,
                   )
+                  table.put_item(Item={'email': BODY})
+
               # Display an error if something goes wrong.
               except ClientError as e:
                   print(e.response['Error']['Message'])
