@@ -16,18 +16,6 @@ Parameters:
   Subnet3CIDR:
     Type: String
     Default: "10.192.12.0/24"
-  Subnet1AZ:
-    Description: Zone 1, !Select [ 0, !GetAZs '' ]
-    Type: String
-    Default: "us-east-1a"
-  Subnet2AZ:
-    Description: Zone 2, !Select [ 1, !GetAZs '' ]
-    Type: String
-    Default: "us-east-1b"
-  Subnet3AZ:
-    Description: Zone 3, !Select [ 2, !GetAZs '' ]
-    Type: String
-    Default: "us-east-1c"
   AmiID:
     Description: the ami id, you will get it after you run packer
     Type: String
@@ -44,15 +32,6 @@ Parameters:
     Type: String
     NoEcho: true
     Default: "mysql1234"
-  RDSSubnet1AZ:
-    Type: String
-    Default: "us-east-1d"
-  RDSSubnet2AZ:
-    Type: String
-    Default: "us-east-1e"
-  RDSSubnet3AZ:
-    Type: String
-    Default: "us-east-1f"
   RDSSubnet1CIDR:
     Type: String
     Default: "10.192.13.0/24"
@@ -68,15 +47,28 @@ Parameters:
   DNSName:
     Type: String
     Default: "demo.xihou.me"
-#  lambdaBucketName:
-#    Type: String
-#    Default: "csye6225-22928"
-#  lambdaFuncName:
-#    Type: String
-#    Default: "lambda_function.zip"
+  lambdaBucketName:
+    Type: String
+    Default: "csye6225-22928"
+  lambdaFuncName:
+    Type: String
+    Default: "csye6225-lambda-func"
+  lambdaZipName:
+    Type: String
+    Default: "main.zip"
   dynamoTable:
     Type: String
     Default: "UserTokenTable"
+  InstanceType:
+    Type: String
+    Default: "t2.micro"
+  SSLCertId:
+    Type: String
+    Default: "019619b9-8ebe-4bb6-91b9-bc663f24cf17"
+    Description: "SSL Certificate Id"
+  HealthCheckPath:
+    Type: String
+    Default: "/healthz"
 
 
 Resources:
@@ -121,7 +113,7 @@ Resources:
       VpcId:
         Ref: myVPC
       CidrBlock: !Ref Subnet1CIDR
-      AvailabilityZone: !Ref Subnet1AZ
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
       Tags:
         - Key: Name
           Value: !Ref AWS::StackName
@@ -132,7 +124,7 @@ Resources:
       VpcId:
         Ref: myVPC
       CidrBlock: !Ref Subnet2CIDR
-      AvailabilityZone: !Ref Subnet2AZ
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
       Tags:
         - Key: Name
           Value: !Ref AWS::StackName
@@ -143,7 +135,7 @@ Resources:
       VpcId:
         Ref: myVPC
       CidrBlock: !Ref Subnet3CIDR
-      AvailabilityZone: !Ref Subnet3AZ
+      AvailabilityZone: !Select [ 2, !GetAZs '' ]
       Tags:
         - Key: Name
           Value: !Ref AWS::StackName
@@ -178,27 +170,23 @@ Resources:
         Ref: myVPC
       SecurityGroupIngress:
         - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: 0.0.0.0/0
+#          CidrIp: 0.0.0.0/0
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
         - IpProtocol: tcp
           FromPort: 22928
           ToPort: 22928
-          CidrIp: 0.0.0.0/0
-  EC2Instance:
-    Type: AWS::EC2::Instance
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+
+  EC2LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
     Properties:
-      UserData:
-        Fn::Base64:
-          !Sub |
+      LaunchTemplateName: !Sub 'asg_launch_config'
+      LaunchTemplateData:
+        UserData:
+          Fn::Base64:
+            !Sub |
             #!/bin/bash
             sudo chmod 777 /home/ubuntu/env
             echo -e "DB_HOST=${RDSDBInstance.Endpoint.Address}" >> /home/ubuntu/env
@@ -217,20 +205,29 @@ Resources:
             sudo systemctl enable python.service
             sudo systemctl restart python.service
             sudo systemctl status python.service
-      ImageId: !Ref AmiID
-      KeyName: !Ref KeyName
-      InstanceType: t2.micro
-      IamInstanceProfile: !Ref IAMInstanceProfile
-      DisableApiTermination: false
-      SubnetId: !Ref mySubnet1
-      SecurityGroupIds:
-        - !Ref ApplicationSecurityGroup
-      BlockDeviceMappings:
-        - DeviceName: /dev/sda1
-          Ebs:
-            VolumeSize: "50"
-            VolumeType : "gp2"
-            DeleteOnTermination: "true"
+        ImageId: !Ref AmiID
+        BlockDeviceMappings:
+          - DeviceName: /dev/sda1
+            Ebs:
+              VolumeType: gp3
+              VolumeSize: 20
+              DeleteOnTermination: true
+              Encrypted: true
+              KmsKeyId: !Ref EBSKmsKey
+        InstanceType: !Ref InstanceType
+        KeyName: !Ref KeyName
+        IamInstanceProfile:
+          Arn: !Sub 'arn:aws:iam::${AWS::AccountId}:instance-profile/${AWS::StackName}-LaunchTemplateIAMInstanceProfile'
+#        SecurityGroupIds:
+#          - !Ref ApplicationSecurityGroup
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            AssociatePublicIpAddress: 'true'
+            Groups:
+              - !GetAtt ApplicationSecurityGroup.GroupId
+            SubnetId:
+              Ref: mySubnet1
+
   RDSDBInstance:
     Type: 'AWS::RDS::DBInstance'
     DeletionPolicy: Delete
@@ -248,6 +245,8 @@ Resources:
       AllocatedStorage: "50"
       VPCSecurityGroups: [!Ref DatabaseSecurityGroup]
       DBParameterGroupName: !Ref RDSDBParameterGroup
+      StorageEncrypted: true
+      KmsKeyId: !Ref RdsKmsKey
   RDSDBParameterGroup:
     Type: 'AWS::RDS::DBParameterGroup'
     Properties:
@@ -258,19 +257,19 @@ Resources:
     Properties:
       VpcId: !Ref myVPC
       CidrBlock: !Ref RDSSubnet1CIDR
-      AvailabilityZone: !Ref RDSSubnet1AZ
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
   RDSSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref myVPC
       CidrBlock: !Ref RDSSubnet2CIDR
-      AvailabilityZone: !Ref RDSSubnet2AZ
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
   RDSSubnet3:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref myVPC
       CidrBlock: !Ref RDSSubnet3CIDR
-      AvailabilityZone: !Ref RDSSubnet3AZ
+      AvailabilityZone: !Select [ 2, !GetAZs '' ]
   PrivateRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -374,19 +373,226 @@ Resources:
   IAMInstanceProfile:
     Type: "AWS::IAM::InstanceProfile"
     Properties:
+      InstanceProfileName: !Sub '${AWS::StackName}-LaunchTemplateIAMInstanceProfile'
       Path: "/"
       Roles:
         - Ref: "IAMRole"
+
+  asgWebApp:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn:
+      - EC2LaunchTemplate
+      - LoadBalancerTargetGroup
+    Properties:
+      AutoScalingGroupName: !Sub 'my-asg'
+      AvailabilityZones:
+        - !Select [ 0, !GetAZs '' ]
+        - !Select [ 1, !GetAZs '' ]
+        - !Select [ 2, !GetAZs '' ]
+      LaunchTemplate:
+        LaunchTemplateId: !Ref EC2LaunchTemplate
+        Version: !GetAtt EC2LaunchTemplate.LatestVersionNumber
+      MinSize: 1
+      MaxSize: 3
+      DesiredCapacity: 1
+      VPCZoneIdentifier:
+        - !Ref mySubnet1
+        - !Ref mySubnet2
+        - !Ref mySubnet3
+      Cooldown: '60'
+      Tags:
+        - Key: Application
+          Value: WebApp
+          PropagateAtLaunch: "true"
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-asg'
+          PropagateAtLaunch: "true"
+      TargetGroupARNs:
+        - !Ref LoadBalancerTargetGroup
+
+  asgUpCPUPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      ScalingAdjustment: '1'
+      AutoScalingGroupName: !Ref asgWebApp
+  AvgCPUUp:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: !Sub '${AWS::StackName}-AVGCPUUP'
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 2
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Period: 60
+      Statistic: Average
+      Threshold: 5.0
+      AlarmActions:
+        - !Ref asgUpCPUPolicy
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref asgWebApp
+
+  asgDownCPUPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      ScalingAdjustment: '-1'
+      AutoScalingGroupName: !Ref asgWebApp
+  AvgCPUDown:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: !Sub '${AWS::StackName}-AVGCPUDOWN'
+      ComparisonOperator: LessThanThreshold
+      EvaluationPeriods: 2
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Period: 60
+      Statistic: Average
+      Threshold: 3.0
+      AlarmActions:
+        - !Ref asgDownCPUPolicy
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref asgWebApp
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Load Balancer Security Group
+      VpcId: !Ref myVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      IpAddressType: ipv4
+      Name: !Sub '${AWS::StackName}-LoadBalancer'
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+      Subnets:
+        - !Ref mySubnet1
+        - !Ref mySubnet2
+        - !Ref mySubnet3
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '60'
+      Type: application
+      Tags:
+        - Key: Application
+          Value: WebApp
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-LoadBalancer'
+  LoadBalancerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${AWS::StackName}-TargetGroup'
+      Port: 22928
+      Protocol: HTTP
+      VpcId: !Ref myVPC
+      HealthCheckIntervalSeconds: 90
+      HealthCheckPath: !Ref HealthCheckPath
+      HealthCheckPort: '22928'
+      HealthCheckProtocol: 'HTTP'
+      HealthCheckTimeoutSeconds: 60
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      TargetType: instance
+      IpAddressType: ipv4
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '20'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-LB-TargetGroup'
+  loadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Join [ "", [ "arn:aws:acm:", !Ref AWS::Region, ":", !Ref AWS::AccountId, ":certificate/", !Ref SSLCertId ] ]
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref LoadBalancerTargetGroup
+
+  RdsKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub KMS Key for RDS
+      KeyPolicy:
+        Version: "2012-10-17"
+        Id: "kms-key-for-rds"
+        Statement:
+          - Sid: "Allow IAM User permission for RDS Instance"
+            Effect: Allow
+            Principal:
+              AWS: !Join
+                - ''
+                - - 'arn:aws:iam::'
+                  - !Ref 'AWS::AccountId'
+                  - ':root'
+            Action:
+              - "kms:*"
+            Resource: "*"
+          - Sid: "Add service role"
+            Effect: Allow
+            Principal:
+              AWS: !Join
+                - ''
+                - - 'arn:aws:iam::'
+                  - !Ref 'AWS::AccountId'
+                  - ':role/aws-service-role/rds.amazonaws.com/AWSServiceRoleForRDS'
+            Action:
+              - "kms:*"
+            Resource: "*"
+  EBSKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub KMS Key for EBS
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Id: "kms-key-for-ebs"
+        Statement:
+          - Sid: "Allow IAM User permission for EBS"
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - "kms:*"
+            Resource: "*"
+          - Sid: "Add service role"
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
+            Action:
+              - "kms:*"
+            Resource: "*"
+#            Condition:
+#              Bool:
+#                kms:GrantIsForAWSResource: true
+
   myDNSRecord:
-    Type: AWS::Route53::RecordSet
+    Type: AWS::Route53::RecordSetGroup
     Properties:
       HostedZoneName: !Ref 'DNSHostedZone'
-      Comment: DNS name for my instance.
-      Name: !Ref DNSName
-      Type: A
-      TTL: 900
-      ResourceRecords:
-        - !GetAtt EC2Instance.PublicIp
+      RecordSets:
+        - Name: !Ref DNSName
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt LoadBalancer.DNSName
+            HostedZoneId: !GetAtt LoadBalancer.CanonicalHostedZoneID
+
   SNSTopic:
     Type: AWS::SNS::Topic
     Properties:
@@ -475,15 +681,15 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-#        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
         - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
         - "arn:aws:iam::aws:policy/AmazonSESFullAccess"
         - "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess"
   LambdaFunction:
     Type: AWS::Lambda::Function
     Properties:
-      Description: !Sub 'csye6225-Lambda-function'
-      Handler: index.lambda_handler
+      Description: !Sub 'csye6225-lambda-function'
+      FunctionName: !Ref lambdaFuncName
+      Handler: main.lambda_handler
       Role: !GetAtt LambdaRole.Arn
       Runtime: python3.9
       Timeout: 60
@@ -492,69 +698,8 @@ Resources:
       TracingConfig:
         Mode: Active
       Code:
-        ZipFile: |
-          import boto3
-          import json
-          from botocore.exceptions import ClientError
-          def lambda_handler(event, context):
-              payloads = event['Records'][0]["Sns"]
-              msg = json.loads(payloads['Message'])
-              SENDER = "support@demo.xihou.me"
-              RECIPIENT = msg['to']
-
-              DESTINATION = {'ToAddresses': [
-                      msg['to'],
-                  ]
-              }
-
-              SUBJECT = payloads['Subject']
-              BODY = msg['content']
-              CHARSET = "UTF-8"
-
-              client = boto3.client('ses')
-              dynamo = boto3.resource('dynamodb')
-              table = dynamo.Table('emailTrackingTable')
-
-              try:
-                  resp = table.get_item(Key={'email': BODY})
-                  item = resp.get('Item', {})
-                  if item:
-                      print('The email content has been sent!')
-                      return {'statusCode': 200, 'body': json.dumps(item)}
-                  resp = client.send_email(
-                      Destination=DESTINATION,
-                      Message={
-                          'Body': {
-                              'Html': {
-                                  'Charset': CHARSET,
-                                  'Data': BODY,
-                              },
-                          },
-                          'Subject': {
-                              'Charset': CHARSET,
-                              'Data': SUBJECT,
-                          },
-                      },
-                      Source=SENDER,
-                  )
-                  table.put_item(Item={'email': BODY})
-
-              # Display an error if something goes wrong.
-              except ClientError as e:
-                  print(e.response['Error']['Message'])
-              else:
-                  print(resp)
-                  print("Email sent! Message ID:")
-                  print(resp['MessageId'])
-                  print(RECIPIENT)
-
-                  return {
-                      'statusCode': 200,
-                      'body': json.dumps(resp)
-                  }
-
-#        S3Bucket: !Ref lambdaBucketName
-#        S3Key: !Ref lambdaFuncName
+        S3Bucket: !Ref lambdaBucketName
+        S3Key: !Ref lambdaZipName
 
 
 Outputs:
@@ -576,9 +721,6 @@ Outputs:
     Value: !Ref RDSSubnet2
   RDSSubnet3:
     Value: !Ref RDSSubnet3
-  EC2Instance:
-    Description: The instance ID
-    Value: !Ref EC2Instance
   ApplicationSecurityGroup:
     Description: The SG ID
     Value: !Ref ApplicationSecurityGroup
